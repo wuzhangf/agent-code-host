@@ -1,0 +1,16 @@
+target/
+out/
+logs/
+*.class
+*.iml
+.idea/
+.vscode/
+.DS_Store
+runtime-data/
+.local/
+*.local
+.env
+secrets/
+config/service.properties
+busi-agent-state/
+busi-agent-logs/

@@ -1,0 +1,35 @@
+package com.sage.business.code.bootstrap;
+
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.node.*;
+import java.util.concurrent.*;
+import java.util.concurrent.atomic.AtomicInteger;
+import org.junit.*;
+
+/** Actual model IO, parent PAUSE, durable queue suspension and explicit continuation of undispatched work. */
+public class WritablePauseProtocolTest extends WritableCollaborationProtocolTest {
+    private final Semaphore firstChild=new Semaphore(0);
+    private boolean pauseChild;
+    private final AtomicInteger parents=new AtomicInteger(),xs=new AtomicInteger(),ys=new AtomicInteger();
+    @Override protected void observeModelRequest(JsonNode request){super.observeModelRequest(request);String text=request.toString();if(!request.path("tools").toString().contains("collaboration_control")&&text.contains("CHILD_WRITE_")){if(text.contains("CHILD_WRITE_X"))xs.incrementAndGet();else ys.incrementAndGet();}else parents.incrementAndGet();}
+    @Override protected void awaitModelPermit(JsonNode request)throws java.io.IOException{if(pauseChild&&request.toString().contains("CHILD_WRITE_X")&&!request.path("tools").toString().contains("collaboration_control")){try{if(!firstChild.tryAcquire(60,TimeUnit.SECONDS))throw new java.io.IOException("Child gate timed out");}catch(InterruptedException e){Thread.currentThread().interrupt();throw new java.io.IOException(e);}return;}super.awaitModelPermit(request);}
+    @After public void unblockChild(){firstChild.release(20);releaseModel.release(20);}
+    private ObjectNode budget(int calls,int edits){return mapper.createObjectNode().put("logicalCalls",Integer.toString(calls)).put("httpRequests",Integer.toString(calls)).put("editAttempts",Integer.toString(edits));}
+    @Test public void parentPauseSuspendsQueuedUnitAndResumeDoesNotRerunCancelledChild()throws Exception{
+        pauseChild=true;
+        ObjectNode create=mapper.createObjectNode().put("workspaceAlias","sample").put("interactionMode","ACT").put("intent","IMPLEMENT").put("executionMode","MODIFY").put("autonomyLevel","HIGH").put("verificationLevel","COMPILE").put("initialWorkspaceListing",false).put("maxModelTurns",30).put("maxEditAttempts",10);
+        create.putArray("writeAllow").add("x.txt").add("y.txt");create.putObject("workspacePolicy").put("mode","ISOLATED_WORKTREE");
+        JsonNode session=api("POST","/api/v2/sessions","pause-parent",a,create,201);String sid=session.path("sessionId").asText();ObjectNode message=mapper.createObjectNode().put("clientMessageId","pause-main").put("content","PARENT_MAIN_INSPECT: inspect the explicitly authorized collaboration before completing.").put("expectedSessionVersion",session.path("sessionVersion").asLong());message.putArray("attachments");String rid=api("POST","/api/v2/sessions/"+sid+"/messages","pause-main",a,message,202).path("runId").asText();
+        await(()->parents.get()==1,"Parent not started");String groups="/api/v2/runs/"+rid+"/collaboration-groups",group=groups+"/pause-group";
+        ObjectNode draft=mapper.createObjectNode().put("requestId","pause-group").put("expectedExecutionEpoch","1");ArrayNode units=draft.putObject("graph").put("schemaVersion","collaboration-graph/1").put("samePathMode","REJECT").put("requestedParallelism",1).putArray("units");
+        for(String name:new String[]{"x","y"}){ObjectNode unit=units.addObject().put("unitId",name).put("kind","WRITE_CANDIDATE").put("objective","CHILD_WRITE_"+name.toUpperCase()+": change the scoped file from v1 to v2").put("required","y".equals(name)).put("allowNoChanges",false);unit.putArray("readScope").add(name+".txt");unit.putArray("writeScope").add(name+".txt");unit.putArray("dependsOn");}
+        JsonNode created=api("POST",groups,"pause-group",a,draft,202);ObjectNode grant=mapper.createObjectNode().put("requestId","pause-grant").put("expectedGraphRevision",created.path("revision").asText()).put("graphFingerprint",created.path("graphFingerprint").asText()).put("adoptionMode","USER_CONFIRM").put("retryLimit",0).put("repairLimit",0);grant.set("integrationReserve",budget(1,1));grant.set("repairReserve",budget(0,0));ArrayNode budgets=grant.putArray("units");for(String name:new String[]{"x","y"}){ObjectNode value=budgets.addObject().put("unitId",name);value.set("total",budget(5,1));value.set("perAttempt",budget(5,1));}
+        JsonNode authorized=api("POST",group+"/authorizations","pause-grant",a,grant,202),current=api("GET",group,null,b,null,200);ObjectNode start=mapper.createObjectNode().put("startId","pause-start").put("expectedGraphRevision",current.path("revision").asText()).put("grantFingerprint",authorized.path("grantFingerprint").asText()).put("expectedExecutionEpoch","1");api("POST",group+"/start","pause-start",a,start,202);releaseModel.release();
+        await(()->xs.get()==1&&parents.get()==2,"First child and parent boundary not reached");JsonNode activity=api("GET","/api/v2/runs/"+rid+"/collaboration-activity",null,b,null,200);Assert.assertFalse(activity.toString(),activity.path("quiescent").asBoolean());Assert.assertEquals(0,ys.get());
+        JsonNode run=api("GET","/api/v2/runs/"+rid,null,b,null,200);command(rid,"pause-with-child","PAUSE",run.path("stateVersion").asLong(),a);releaseModel.release();await(()->"PAUSED_FOR_HUMAN".equals(api("GET","/api/v2/runs/"+rid,null,b,null,200).path("sourceStatus").asText()),"Parent failed to pause");firstChild.release(10);
+        await(()->"SUSPENDED".equals(api("GET",group,null,b,null,200).path("state").asText()),"Child stop did not settle the suspended group; fixture="+root);JsonNode suspended=api("GET",group,null,b,null,200);boolean queued=false;for(JsonNode child:suspended.path("children"))if("y".equals(child.path("unitId").asText()))queued="QUEUED_SUSPENDED".equals(child.path("state").asText());Assert.assertTrue(suspended.toString(),queued);Assert.assertEquals(1,xs.get());
+        run=api("GET","/api/v2/runs/"+rid,null,b,null,200);command(rid,"resume-paused-main","RESUME",run.path("stateVersion").asLong(),a);await(()->parents.get()==3,"Main did not resume");Thread.sleep(200);Assert.assertEquals("RESUME alone must not dispatch queued work",0,ys.get());
+        current=api("GET",group,null,b,null,200);start.put("startId","explicit-queue-continue").put("expectedGraphRevision",current.path("revision").asText());api("POST",group+"/start","explicit-queue-continue",a,start,202);releaseModel.release();await(()->ys.get()==3&&"READY".equals(api("GET",group,null,b,null,200).path("state").asText()),"Explicit continuation did not finish only the queued unit; fixture="+root);Assert.assertEquals("Cancelled child must never be implicitly rerun",1,xs.get());
+        java.nio.file.Path managed=java.nio.file.Paths.get(fixtureServices().tasks.observationRun(rid).productWorkspaceRoot);Assert.assertEquals("v1",java.nio.file.Files.readString(managed.resolve("x.txt")));Assert.assertEquals("v1",java.nio.file.Files.readString(managed.resolve("y.txt")));run=api("GET","/api/v2/runs/"+rid,null,b,null,200);command(rid,"stop-pause-fixture","STOP",run.path("stateVersion").asLong(),a);releaseModel.release(20);
+    }
+}

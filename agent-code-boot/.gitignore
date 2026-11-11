@@ -1,0 +1,12 @@
+target/
+out/
+logs/
+runtime-data/
+.local/
+*.local
+.env
+*.iml
+.idea/
+.vscode/
+secrets/
+config/service.properties
