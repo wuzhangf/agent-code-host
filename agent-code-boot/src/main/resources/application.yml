@@ -1,0 +1,13 @@
+spring:
+  application:
+    name: agent-code-boot
+  main:
+    # The embedded engine owns the HTTP contract surface; the Boot side is the
+    # host/lifecycle only and binds no web port of its own.
+    web-application-type: none
+
+agentcode:
+  engine:
+    # Engine service.properties (see config/service.properties.example).
+    config: ${AGENTCODE_ENGINE_CONFIG:config/service.properties}
+    provenance-prefix: agent-code-boot

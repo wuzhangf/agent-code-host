@@ -1,0 +1,12 @@
+# Standalone host configuration. Copy to service.properties and edit.
+server.host=127.0.0.1
+server.port=8766
+# Bearer token Electron uses to authenticate (min 16 chars).
+auth.token=change-me-32-characters-minimum!!!
+state.dir=./busi-agent-state
+log.dir=./busi-agent-logs
+log.level=INFO
+# Model catalog file (see model-providers.properties.example).
+model.config=./model-providers.properties
+# Workspace aliases exposed to the desktop: workspace.<alias>=<absolute path>
+workspace.sample=/absolute/path/to/your-project

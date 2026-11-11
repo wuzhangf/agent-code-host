@@ -1,0 +1,20 @@
+# Copy to config/service.properties and adjust.
+# Format is identical to the standalone launcher's service.properties.
+
+server.host=127.0.0.1
+server.port=8780
+
+# Bearer token is read from the named environment variable, never this file.
+auth.token-env=CODEAGENT_SERVICE_TOKEN
+
+state.dir=runtime-data/state
+
+# Model provider catalog file (PROVIDER_N_* entries; keys come from env).
+model.config=config/model-providers.properties
+
+# Registered workspaces the engine may operate on: workspace.<alias>=<path>
+#workspace.mydemo=../my-git-project
+
+queue.capacity=20
+runs.max-active=6
+runs.max-active-per-session=1
