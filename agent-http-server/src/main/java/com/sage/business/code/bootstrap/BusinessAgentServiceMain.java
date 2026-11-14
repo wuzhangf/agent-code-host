@@ -109,6 +109,7 @@ public final class BusinessAgentServiceMain {
                 if (services.catalogSynchronizer != null) {
                     services.catalogSynchronizer.close();
                 }
+                services.sessions.closeOrdinaryTurns();
                 services.terminals.close();
                 services.mcp.close();
                 services.hooks.close();

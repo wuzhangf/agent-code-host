@@ -1841,7 +1841,7 @@ public final class BusinessServiceFactory {
                             config.process, approvals, ordinaryShellRoot, inputAssets,
                             ordinaryModelAlias(chatModel), history, content,
                             attachments, executionId, sessionId, fullAccess, defaultReadDirectories, true,
-                            extensions, ordinaryChatPermissions, store);
+                            extensions, ordinaryChatPermissions, ordinaryOutputLimit(chatModel), store);
                 } finally {
                     releaseOrdinaryModel(modelCapture, chatModel);
                 }
@@ -3539,7 +3539,8 @@ public final class BusinessServiceFactory {
             catalogSynchronizer.start();
         }
         runCommands.recoverAccepted();
-        return new GuiServices(tasks, gui,
+        sessionV2.recoverOrdinaryTurns();
+        return new GuiServices(tasks, gui, sessionV2,
                 new GuiHttpAdapter(gui, guiRuntimeConfig(config,
                         modelConfiguration), mapper,
                         workspaceDiffs),
@@ -5080,6 +5081,18 @@ public final class BusinessServiceFactory {
         return pin;
     }
 
+    private static Integer ordinaryOutputLimit(CapturedModelContext captured) {
+        ModelSelectionResolver.ResolvedSelection selection = captured.selection();
+        if (selection == null) {
+            selection = captured.resolver().resolveHostDefault(captured.defaultModelPin());
+        }
+        if (selection == null) return null;
+        com.agent.framework.model.routing.ModelProfile profile =
+                captured.resolver().catalog().resolveExplicit(selection.providerId, selection.wireModelId);
+        return profile == null ? null : Integer.valueOf((int) Math.min(
+                profile.getMaxOutputTokens(), Integer.MAX_VALUE));
+    }
+
     /**
      * Runs the lightweight workspace-free chat loop. The ordinary path does
      * not create a task or a workspace lane, but it still exposes the process
@@ -5212,7 +5225,7 @@ public final class BusinessServiceFactory {
         return completeOrdinaryChatResult(modelPort, process, approvals, shellRoot,
                 inputAssets, modelAlias, history, content, attachments, executionId,
                 null, fullAccess, defaultReadDirectories, allowSubagent, extensionBinding, null,
-                artifacts);
+                null, artifacts);
     }
 
     private static OrdinaryChatResult completeOrdinaryChatResult(
@@ -5233,7 +5246,7 @@ public final class BusinessServiceFactory {
             com.agent.framework.extension.binding.RunExtensionBinding extensionBinding,
             com.sage.business.code.application.executionpolicy
                     .UnifiedExecutionPermissionAdapter permissionAdapter,
-            AtomicJsonStore artifacts) {
+            Integer maxOutputTokens, AtomicJsonStore artifacts) {
         if (modelPort == null) throw new IllegalArgumentException("model port is required");
         final boolean shellEnabled = process != null && process.isEnabled();
         final java.util.List<com.agent.framework.model.ModelTool> tools =
@@ -5529,7 +5542,7 @@ public final class BusinessServiceFactory {
                                 .options(com.agent.framework.model.ModelOptions.builder()
                                         .toolChoice(com.agent.framework.model.ToolChoice.AUTO)
                                         .parallelToolCalls(Boolean.FALSE)
-                                        .maxOutputTokens(Integer.valueOf(2048)).build());
+                                        .maxOutputTokens(maxOutputTokens).build());
                 if (modelAlias != null && !modelAlias.trim().isEmpty()) request.model(modelAlias.trim());
                 com.agent.framework.model.ModelResponse response = modelPort.generate(request.build());
                 if (response == null || response.getMessage() == null
@@ -6070,6 +6083,7 @@ public final class BusinessServiceFactory {
     public static final class GuiServices {
         public final TaskApplicationService tasks;
         public final GuiTaskOrchestrator gui;
+        public final com.sage.business.code.application.session.SessionService sessions;
         public final GuiHttpAdapter adapter;
         /** API v2 plane: dispatcher over desktop route groups + the legacy event plane. */
         public final com.sun.net.httpserver.HttpHandler v2;
@@ -6125,6 +6139,7 @@ public final class BusinessServiceFactory {
                 .EnterpriseCatalogSynchronizer catalogSynchronizer;
 
         GuiServices(TaskApplicationService tasks, GuiTaskOrchestrator gui,
+                com.sage.business.code.application.session.SessionService sessions,
                 GuiHttpAdapter adapter, com.sun.net.httpserver.HttpHandler v2,
                 com.sage.business.code.application.spec.SpecService specs,
                 com.sage.business.code.application.policy.RiskPolicyEngine riskPolicy,
@@ -6149,6 +6164,7 @@ public final class BusinessServiceFactory {
                         .EnterpriseCatalogSynchronizer catalogSynchronizer) {
             this.tasks = tasks;
             this.gui = gui;
+            this.sessions = sessions;
             this.adapter = adapter;
             this.v2 = v2;
             this.specs = specs;
