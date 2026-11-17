@@ -35,7 +35,7 @@
   <properties>
     <java.version>21</java.version>
     <!-- Pinned engine line. Bump together with the BOM release. -->
-    <agent.code.version>0.1.0-worker-writable.17</agent.code.version>
+    <agent.code.version>0.1.0-worker-writable.18</agent.code.version>
   </properties>
 
   <dependencyManagement>

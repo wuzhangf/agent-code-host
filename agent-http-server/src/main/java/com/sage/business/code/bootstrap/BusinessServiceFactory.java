@@ -7,6 +7,7 @@ import com.fasterxml.jackson.databind.SerializationFeature;
 import com.sage.business.code.adapter.gui.GuiHttpAdapter;
 import com.sage.business.code.adapter.product.ProcessExecutionSettings;
 import com.sage.business.code.adapter.product.ProductCodeExecutorAdapter;
+import com.sage.business.code.adapter.product.ToolSchedulingSettings;
 import com.sage.business.code.adapter.product.TraceExportSettings;
 import com.sage.business.code.adapter.product.MemoryIntegrationSettings;
 import com.sage.business.code.adapter.product.SandboxExecutionSettings;
@@ -102,7 +103,7 @@ public final class BusinessServiceFactory {
         return create(config.stateDir, config.workspaces, config.process, config.trace,
                 config.workerCount, config.queueCapacity, config.memory, config.sandbox,
                 config.modelProperties, config.getReadOnlySubagent(),
-                config.getWeb(), personalModelCatalog);
+                config.getWeb(), personalModelCatalog, config.toolScheduling);
     }
 
     public static TaskApplicationService create(
@@ -156,7 +157,8 @@ public final class BusinessServiceFactory {
             Path modelProperties, ReadOnlySubagentSettings readOnlySettings,
             WebSettings web) {
         return create(state, aliases, process, trace, workerCount, queueCapacity,
-                memory, sandbox, modelProperties, readOnlySettings, web, true);
+                memory, sandbox, modelProperties, readOnlySettings, web, true,
+                null);
     }
 
     /**
@@ -165,6 +167,10 @@ public final class BusinessServiceFactory {
      * {@code overlayParticipates()} so a FILE_COMPAT host never
      * materializes the personal model-catalog control-plane slice (MA03);
      * the legacy programmatic entry points keep {@code true}.
+     *
+     * <p>{@code toolScheduling} arrives only from the ServiceConfig path
+     * (design 2026-11-17); programmatic callers pass null and runs keep
+     * the legacy system-property resolution.</p>
      */
     private static TaskApplicationService create(
             Path state, Map<String, String> aliases,
@@ -172,7 +178,8 @@ public final class BusinessServiceFactory {
             int workerCount, int queueCapacity,
             MemoryIntegrationSettings memory, SandboxExecutionSettings sandbox,
             Path modelProperties, ReadOnlySubagentSettings readOnlySettings,
-            WebSettings web, boolean personalModelCatalog) {
+            WebSettings web, boolean personalModelCatalog,
+            ToolSchedulingSettings toolScheduling) {
         ObjectMapper mapper = mapper();
         WorkspaceRegistry registry = new WorkspaceRegistry(aliases);
         AtomicJsonStore store = new AtomicJsonStore(state, mapper);
@@ -240,6 +247,9 @@ public final class BusinessServiceFactory {
         ProductCodeExecutorAdapter executorAdapter =
                 new ProductCodeExecutorAdapter(approvals, process, trace,
                         new com.sage.business.code.application.BudgetApprovalSink() { public void record(String runId, com.agent.product.code.BudgetApprovalRequest request, String checkpointJson) { budgetApprovals.record(runId, request, checkpointJson); } }, memoryPort, memory, sandbox, sandboxDiscovery, sandboxApprovals, sandboxStagingRoot);
+        if (toolScheduling != null) {
+            executorAdapter.setToolSchedulingPolicy(toolScheduling.toPolicy());
+        }
         executorAdapter.setWebSettings(web);
         executorAdapter.setWebCredentialResolver(
                 new com.sage.business.code.infrastructure.websearch
@@ -886,6 +896,8 @@ public final class BusinessServiceFactory {
                 executorAdapter.setHostDefaultModel(refreshed.defaultModelPin());
             }
         });
+        executorAdapter.setToolSchedulingPolicy(
+                config.toolScheduling.toPolicy());
         executorAdapter.setWebSettings(config.getWeb());
         executorAdapter.setWebCredentialResolver(
                 new com.sage.business.code.infrastructure.websearch
